@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code Runner</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f7f9; --card: #ffffff; --text: #1c1f24; --muted: #6b7280;
+      --border: #d9dde3; --accent: #2563eb; --accent-text: #ffffff;
+      --ok: #15803d; --bad: #b91c1c; --warn: #b45309; --code-bg: #0f172a; --code-text: #e2e8f0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0e1116; --card: #161b22; --text: #e6e8eb; --muted: #8b949e;
+        --border: #30363d; --accent: #3b82f6; --accent-text: #ffffff;
+        --ok: #4ade80; --bad: #f87171; --warn: #fbbf24; --code-bg: #010409; --code-text: #e6edf3;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--text);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    main { max-width: 860px; margin: 0 auto; }
+    h1 { margin: 0 0 4px; font-size: 22px; }
+    .sub { margin: 0 0 20px; color: var(--muted); }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 16px; margin-bottom: 16px;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 12px; }
+    label { font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+    select, button, textarea {
+      font: inherit; color: inherit; background: var(--card);
+      border: 1px solid var(--border); border-radius: 8px;
+    }
+    select { padding: 8px 10px; min-width: 170px; }
+    textarea {
+      width: 100%; min-height: 220px; padding: 12px; resize: vertical;
+      font: 13.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: var(--code-bg); color: var(--code-text); border-color: transparent;
+      tab-size: 4;
+    }
+    button.run {
+      background: var(--accent); color: var(--accent-text); border: none;
+      padding: 10px 22px; font-weight: 600; cursor: pointer; border-radius: 8px;
+    }
+    button.run:disabled { opacity: .6; cursor: progress; }
+    .spacer { flex: 1; }
+    .hint { color: var(--muted); font-size: 12.5px; }
+    .status { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12.5px;
+      font-weight: 600; border: 1px solid var(--border); }
+    .status.COMPLETED { color: var(--ok); border-color: var(--ok); }
+    .status.FAILED, .status.ERROR { color: var(--bad); border-color: var(--bad); }
+    .status.TIMEOUT { color: var(--warn); border-color: var(--warn); }
+    .meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 13px; margin-top: 8px; }
+    .meta b { color: var(--text); font-weight: 600; }
+    h2 { margin: 14px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+    pre {
+      margin: 0; padding: 12px; min-height: 44px; max-height: 320px; overflow: auto;
+      background: var(--code-bg); color: var(--code-text); border-radius: 8px;
+      font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    pre.err { color: #fca5a5; }
+    .banner { color: var(--bad); font-size: 14px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Code Runner</h1>
+  <p class="sub">Submit code to the API. It is queued, run in a sandboxed Docker container by the worker, and the result is polled here.</p>
+
+  <section class="card">
+    <div class="row">
+      <label>Language
+        <select id="language">
+          <option value="javascript">JavaScript (Node)</option>
+          <option value="python">Python</option>
+        </select>
+      </label>
+      <label>Examples
+        <select id="example"><option value="">Load an example...</option></select>
+      </label>
+      <span class="spacer"></span>
+      <button class="run" id="run" type="button">Run</button>
+    </div>
+    <textarea id="code" spellcheck="false" aria-label="Code"></textarea>
+    <div class="hint" style="margin-top:6px">Ctrl/Cmd + Enter to run. Limits: 5 s time, 128 MB memory, no network, 10 KB code.</div>
+  </section>
+
+  <section class="card" id="result" hidden>
+    <div class="row" style="margin-bottom:0">
+      <span class="status" id="status">-</span>
+      <span class="hint" id="subid"></span>
+    </div>
+    <div class="meta" id="meta"></div>
+    <h2>stdout</h2>
+    <pre id="stdout"></pre>
+    <h2>stderr</h2>
+    <pre id="stderr" class="err"></pre>
+    <div class="banner" id="banner" hidden></div>
+  </section>
+</main>
+
+<script>
+  const SAMPLES = {
+    javascript: 'console.log("Hello from Node", process.version);\nconsole.log([1, 2, 3].map(x => x * 2));',
+    python: 'import sys\nprint("Hello from Python", sys.version.split()[0])\nprint(sum(range(10)))'
+  };
+
+  const EXAMPLES = [
+    { label: 'Hello world (JavaScript)', language: 'javascript', code: SAMPLES.javascript },
+    { label: 'Hello world (Python)', language: 'python', code: SAMPLES.python },
+    { label: 'Infinite loop -> TIMEOUT', language: 'python', code: 'while True:\n    pass' },
+    { label: 'Syntax error -> FAILED', language: 'python', code: 'print(' },
+    { label: 'Network call -> FAILED (no network)', language: 'python',
+      code: 'import urllib.request\nprint(urllib.request.urlopen("http://example.com", timeout=3).status)' },
+    { label: 'Throw an error (JavaScript)', language: 'javascript', code: 'throw new Error("boom");' }
+  ];
+
+  const $ = (id) => document.getElementById(id);
+  const TERMINAL = ['COMPLETED', 'FAILED', 'TIMEOUT', 'ERROR'];
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  EXAMPLES.forEach((ex, i) => {
+    const o = document.createElement('option');
+    o.value = i; o.textContent = ex.label;
+    $('example').appendChild(o);
+  });
+
+  $('code').value = SAMPLES.javascript;
+
+  $('language').addEventListener('change', () => {
+    // swap the starter code only if the box still holds an untouched sample
+    const other = Object.values(SAMPLES);
+    if (!$('code').value.trim() || other.includes($('code').value)) {
+      $('code').value = SAMPLES[$('language').value];
+    }
+  });
+
+  $('example').addEventListener('change', () => {
+    const ex = EXAMPLES[$('example').value];
+    if (!ex) return;
+    $('language').value = ex.language;
+    $('code').value = ex.code;
+    $('example').value = '';
+  });
+
+  // Tab inserts spaces instead of moving focus
+  $('code').addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const t = e.target, s = t.selectionStart;
+      t.value = t.value.slice(0, s) + '    ' + t.value.slice(t.selectionEnd);
+      t.selectionStart = t.selectionEnd = s + 4;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') run();
+  });
+  $('run').addEventListener('click', run);
+
+  function setStatus(s) {
+    $('status').textContent = s;
+    $('status').className = 'status ' + s;
+  }
+
+  function showBanner(msg) {
+    $('banner').textContent = msg;
+    $('banner').hidden = !msg;
+  }
+
+  function render(d) {
+    $('stdout').textContent = d.stdout || '';
+    $('stderr').textContent = d.stderr || d.error || '';
+    const parts = [];
+    if (d.exitCode !== undefined) parts.push('exit code <b>' + d.exitCode + '</b>');
+    if (d.durationMs !== undefined) parts.push('duration <b>' + d.durationMs + ' ms</b>');
+    if (d.language) parts.push('language <b>' + d.language + '</b>');
+    $('meta').innerHTML = parts.join('');
+  }
+
+  async function run() {
+    const btn = $('run');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    $('result').hidden = false;
+    $('stdout').textContent = ''; $('stderr').textContent = ''; $('meta').textContent = '';
+    $('subid').textContent = ''; showBanner('');
+    setStatus('SUBMITTING');
+
+    try {
+      const res = await fetch('/submissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ language: $('language').value, code: $('code').value })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatus('ERROR');
+        showBanner('Request rejected (' + res.status + '): ' + (data.error || res.statusText));
+        return;
+      }
+      $('subid').textContent = 'id: ' + data.submissionId;
+      setStatus(data.status);
+      await poll(data.submissionId);
+    } catch (err) {
+      setStatus('ERROR');
+      showBanner('Network error: ' + err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function poll(id) {
+    const started = Date.now();
+    while (Date.now() - started < 90000) {
+      await sleep(1000);
+      const res = await fetch('/submissions/' + id);
+      if (!res.ok) { showBanner('Could not read result (' + res.status + ')'); setStatus('ERROR'); return; }
+      const d = await res.json();
+      setStatus(d.status);
+      if (TERMINAL.includes(d.status)) { render(d); return; }
+    }
+    showBanner('Still not finished after 90 s. The worker may be starting up or pulling a Docker image; try again in a minute.');
+  }
+</script>
+</body>
+</html>

@@ -3,6 +3,7 @@ import {randomUUID} from 'node:crypto';
 import config from './config.js';
 import * as db from './db.js';
 import * as queue from './queue.js';
+import path from 'node:path';
 
 async function main() {
     await db.ensureTableLocal();
@@ -15,6 +16,9 @@ async function main() {
         res.send('ok');
     });
 
+    app.get('/home', (req, res) => {
+        res.sendFile(path.join(import.meta.dirname, 'public', 'home.html'));
+    });
     app.post('/submissions',async (req,res)=>{
         const {language,code}=req.body || {};
         if(!config.languages[language]){
