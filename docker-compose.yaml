@@ -1,0 +1,12 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports:
+      - "5672:5672"      # AMQP, used by our app
+      - "15672:15672"    # web UI: http://localhost:15672  (guest / guest)
+
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    command: -jar DynamoDBLocal.jar -sharedDb -inMemory
+    ports:
+      - "8000:8000"
