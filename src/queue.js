@@ -1,5 +1,5 @@
 import ampq from 'amqplib';
-import config from './config';
+import config from './config.js';
 
 
 function buildUrl(){
