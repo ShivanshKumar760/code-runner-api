@@ -17,7 +17,7 @@ async function main() {
     });
 
     app.get('/home', (req, res) => {
-        res.sendFile(path.join(import.meta.dirname, 'public', 'home.html'));
+        res.sendFile(path.join(import.meta.dirname, 'public', 'index.html'));
     });
     app.post('/submissions',async (req,res)=>{
         const {language,code}=req.body || {};
