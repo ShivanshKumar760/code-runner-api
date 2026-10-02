@@ -1,0 +1,54 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # needed for passwordless AWS login (OIDC)
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  PROJECT: code-runner
+  ENV_NAME: dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build bundle
+        run: |
+          chmod +x .platform/hooks/prebuild/*.sh
+          echo "VERSION=${GITHUB_SHA::8}-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          zip -r bundle.zip src Procfile package.json package-lock.json .platform
+
+      - name: Upload and register version
+        run: |
+          BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "${PROJECT}-${ENV_NAME}-app" \
+            --query "Stacks[0].Outputs[?OutputKey=='VersionsBucket'].OutputValue" --output text)
+          aws s3 cp bundle.zip "s3://${BUCKET}/${PROJECT}/${VERSION}.zip"
+          aws elasticbeanstalk create-application-version \
+            --application-name "${PROJECT}-${ENV_NAME}" \
+            --version-label "$VERSION" \
+            --source-bundle "S3Bucket=${BUCKET},S3Key=${PROJECT}/${VERSION}.zip"
+
+      # The SAME zip goes to BOTH environments
+      - name: Deploy to api and worker
+        run: |
+          for E in api worker; do
+            aws elasticbeanstalk update-environment \
+              --environment-name "${PROJECT}-${ENV_NAME}-${E}" --version-label "$VERSION"
+          done
+          aws elasticbeanstalk wait environment-updated \
+            --application-name "${PROJECT}-${ENV_NAME}" \
+            --environment-names "${PROJECT}-${ENV_NAME}-api" "${PROJECT}-${ENV_NAME}-worker"
